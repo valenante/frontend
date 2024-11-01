@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 
-const HistorialPedidos = ({ idMesa }) => {
+const HistorialPedidos = ({ idMesa, actualizar }) => {
     const [pedidos, setPedidos] = useState([]);
     const [cargando, setCargando] = useState(true);
     const [mensajeError, setMensajeError] = useState('');
@@ -23,7 +23,7 @@ const HistorialPedidos = ({ idMesa }) => {
         };
 
         obtenerPedidos();
-    }, [idMesa]);
+    }, [idMesa, actualizar]); // Escuchar cambios en idMesa y actualizar
 
     if (cargando) {
         return <p>Cargando...</p>;

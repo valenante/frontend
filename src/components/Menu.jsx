@@ -13,6 +13,8 @@ const Menu = () => {
     const [mesaAbierta, setMesaAbierta] = useState(false);
     const [mesa, setMesa] = useState({});
     const [cargando, setCargando] = useState(true);
+    const [actualizarHistorial, setActualizarHistorial] = useState(false);
+    const [pedidoEnviado, setPedidoEnviado] = useState(false);
     const location = useLocation();
     const numeroMesa = new URLSearchParams(location.search).get('mesa');
     const LIMIT = 10;
@@ -20,27 +22,27 @@ const Menu = () => {
     useEffect(() => {
         const verificarOMeterMesa = async (intentos = 3) => {
             if (!numeroMesa) return;
-    
+
             try {
                 const verificarResponse = await fetch(`http://192.168.1.132:3000/api/mesas/verificar-mesa/${numeroMesa}`);
                 if (!verificarResponse.ok) throw new Error('Error al verificar la mesa');
                 const verificarData = await verificarResponse.json();
-    
+
                 if (verificarData.abierta) {
                     setMesaAbierta(true);
                     setMensaje(`Mesa ${numeroMesa} ya está abierta.`);
-                    setMesa({ ...mesa, _id: verificarData._id }); // Guarda el ID de la mesa
+                    setMesa(prevMesa => ({ ...prevMesa, _id: verificarData._id }));
                 } else {
                     const abrirResponse = await fetch(`http://192.168.1.132:3000/api/mesas/abrir-mesa/${numeroMesa}`, {
                         method: 'POST',
                     });
                     if (!abrirResponse.ok) throw new Error('Error al abrir la mesa');
                     const abrirData = await abrirResponse.json();
-    
+
                     if (abrirData.abierta) {
                         setMesaAbierta(true);
                         setMensaje(`Mesa ${numeroMesa} ha sido abierta.`);
-                        setMesa({ ...mesa, _id: abrirData._id }); // Guarda el ID de la mesa
+                        setMesa(prevMesa => ({ ...prevMesa, _id: abrirData._id }));
                     }
                 }
             } catch (error) {
@@ -55,10 +57,10 @@ const Menu = () => {
                 setCargando(false);
             }
         };
-    
+
         verificarOMeterMesa();
-    }, [mesa, numeroMesa]);
-    
+    }, [numeroMesa]);
+
     useEffect(() => {
         const fetchPlatos = async () => {
             try {
@@ -74,8 +76,6 @@ const Menu = () => {
         fetchPlatos();
     }, []);
 
-    
-
     if (cargando) {
         return <div>Cargando...</div>;
     }
@@ -83,26 +83,47 @@ const Menu = () => {
     if (!mesaAbierta) {
         return <div>{mensaje}</div>;
     }
-    
 
-    const agregarAlCarrito = (plato) => {
-        if (!mesaAbierta) {
-            alert("La mesa no está abierta. No puedes agregar platos al carrito.");
-            return;
-        }
-        if (carrito.length < LIMIT) {
-            const existe = carrito.find(item => item._id === plato._id);
-            if (existe) {
-                setCarrito(carrito.map(item =>
-                    item._id === plato._id ? { ...item, cantidad: item.cantidad + 1 } : item
-                ));
-            } else {
-                setCarrito([...carrito, { ...plato, cantidad: 1 }]);
-            }
+    const agregarAlCarrito = (plato, opcionesSeleccionadas) => {
+    if (!mesaAbierta) {
+        alert("La mesa no está abierta. No puedes agregar platos al carrito.");
+        return;
+    }
+        // Asegúrate de que plato.precios.precio esté definido
+        const precio = plato.precios && plato.precios.precio ? plato.precios.precio : 0;
+
+        const uniqueId = `${plato._id}-${JSON.stringify(opcionesSeleccionadas)}`;
+
+        // Verificar si ya existe en el carrito
+        const existe = carrito.find(item => item.uniqueId === uniqueId);
+
+        if (existe) {
+            // Actualiza la cantidad
+            const actualizado = carrito.map(item =>
+                item.uniqueId === uniqueId ? { 
+                    ...item, 
+                    cantidad: item.cantidad + 1 
+                } : item
+            );
+            setCarrito(actualizado);
         } else {
-            alert(`No puedes añadir más de ${LIMIT} platos al carrito.`);
+            // Si el plato no existe, agrégalo al carrito con las opciones
+            const nuevoPlato = { 
+                ...plato, 
+                precio, // Añade el precio correcto
+                cantidad: 1, 
+                opciones: opcionesSeleccionadas, 
+                uniqueId 
+            };
+
+            console.log(nuevoPlato, 'nuevoPlato');
+            setCarrito([...carrito, nuevoPlato]);
         }
-    };
+};
+
+
+
+
 
     const eliminarDelCarrito = (platoId) => {
         setCarrito(carrito => {
@@ -130,7 +151,8 @@ const Menu = () => {
                 body: JSON.stringify({
                     productos: carrito.map(plato => ({
                         platoId: plato._id,
-                        cantidad: plato.cantidad || 1
+                        cantidad: plato.cantidad || 1,
+                        opciones: plato.opciones || {} // Enviar opciones junto con el pedido
                     })),
                     total: carrito.reduce((total, plato) => total + plato.precio * (plato.cantidad || 1), 0),
                     numeroMesa,
@@ -143,8 +165,35 @@ const Menu = () => {
             console.log(data.message);
             setCarrito([]);
             setMensaje('');
+            setActualizarHistorial(prev => !prev);
+            setPedidoEnviado(true);
         } catch (error) {
             console.error('Error al enviar el pedido:', error);
+        }
+    };
+
+    const manejarPago = async () => {
+        if (!numeroMesa) {
+            alert('Por favor, introduce el número de mesa.');
+            return;
+        }
+
+        try {
+            const response = await fetch('http://192.168.1.132:3000/api/notificaciones/enviar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    mensaje: `Mesa ${numeroMesa} está lista para pagar.`
+                }),
+            });
+
+            if (!response.ok) throw new Error('Error al enviar la notificación');
+            const data = await response.json();
+            console.log('Notificación enviada:', data);
+            alert('Notificación enviada a los camareros.');
+        } catch (error) {
+            console.error('Error al enviar la notificación:', error);
+            alert('Hubo un problema al enviar la notificación.');
         }
     };
 
@@ -153,11 +202,15 @@ const Menu = () => {
             <h2 className="mb-4">Menú</h2>
             <div className="row">
                 {platos.map(plato => (
-                    <Plato key={plato._id} plato={plato} agregarAlCarrito={agregarAlCarrito} />
+                    <Plato
+                    key={plato._id}
+                    plato={plato}
+                    agregarAlCarrito={(opcionesSeleccionadas) => agregarAlCarrito(plato, opcionesSeleccionadas)}
+                />                
                 ))}
             </div>
             <Carrito carrito={carrito} eliminarDelCarrito={eliminarDelCarrito} />
-            <PreferenciasEntrega mensaje={mensaje} setMensaje={setMensaje} />
+            <PreferenciasEntrega mensaje={mensaje} setMensaje={setMensaje} carrito={carrito} />
             <button
                 className="btn btn-success mt-4"
                 onClick={enviarPedido}
@@ -165,9 +218,16 @@ const Menu = () => {
             >
                 Enviar Pedido
             </button>
-            <HistorialPedidos idMesa={mesa._id} />
+            <HistorialPedidos idMesa={mesa._id} actualizar={actualizarHistorial} />
+            <button
+                className="btn btn-primary mt-4"
+                onClick={manejarPago}
+                disabled={HistorialPedidos.length === 0 || !mesaAbierta}
+            >
+                Pagar
+            </button>
         </div>
     );
-};
+};    
 
 export default Menu;
